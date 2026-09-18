@@ -67,6 +67,7 @@ use crate::{
         InsertExtractValueIndicesAttr, LinkageAttr, ShuffleVectorMaskAttr, SplatAttr,
         SymbolAddrAttr, SyncScopeAttr,
     },
+    llvm_attrs::LlvmAttributesAttr,
     op_interfaces::{
         AlignableOpInterface, BinArithOp, CastOpInterface, CastOpWithNNegInterface, FastMathFlags,
         FloatBinArithOp, FloatBinArithOpWithFastMathFlags, IntBinArithOp,
@@ -2087,13 +2088,13 @@ impl AtomicStoreOp {
 /// | `res` | the asm result (a void type when there is none) |
 #[pliron_op(
     name = "llvm.inline_asm",
-    format = "attr($llvm_inline_asm_template, $StringAttr) `, ` attr($llvm_inline_asm_constraints, $StringAttr) ` side_effects = ` attr($llvm_inline_asm_side_effects, $BoolAttr) ` convergent = ` attr($llvm_inline_asm_convergent, $BoolAttr) ` (` operands(CharSpace(`,`)) `) : ` type($0)",
+    format = "attr($llvm_inline_asm_template, $StringAttr) `, ` attr($llvm_inline_asm_constraints, $StringAttr) ` side_effects = ` attr($llvm_inline_asm_side_effects, $BoolAttr) ` ` opt_attr($llvm_inline_asm_attrs, $LlvmAttributesAttr, label($attrs)) ` (` operands(CharSpace(`,`)) `) : ` type($0)",
     interfaces = [OneResultInterface],
     attributes = (
         llvm_inline_asm_template: StringAttr,
         llvm_inline_asm_constraints: StringAttr,
         llvm_inline_asm_side_effects: BoolAttr,
-        llvm_inline_asm_convergent: BoolAttr
+        llvm_inline_asm_attrs: LlvmAttributesAttr
     )
 )]
 pub struct InlineAsmOp;
@@ -2106,8 +2107,6 @@ enum InlineAsmOpVerifyErr {
     Constraints,
     #[error("Missing or incorrect inline asm side-effects attribute")]
     SideEffects,
-    #[error("Missing or incorrect inline asm convergent attribute")]
-    Convergent,
 }
 
 impl Verify for InlineAsmOp {
@@ -2121,9 +2120,6 @@ impl Verify for InlineAsmOp {
         }
         if self.get_attr_llvm_inline_asm_side_effects(ctx).is_none() {
             return verify_err!(loc, InlineAsmOpVerifyErr::SideEffects);
-        }
-        if self.get_attr_llvm_inline_asm_convergent(ctx).is_none() {
-            return verify_err!(loc, InlineAsmOpVerifyErr::Convergent);
         }
         Ok(())
     }
@@ -2139,7 +2135,6 @@ impl InlineAsmOp {
         inputs: Vec<Value>,
         asm_template: &str,
         constraints: &str,
-        convergent: bool,
         side_effects: bool,
     ) -> Self {
         let op = Operation::new(
@@ -2154,7 +2149,6 @@ impl InlineAsmOp {
         op.set_attr_llvm_inline_asm_template(ctx, StringAttr::new(asm_template.to_string()));
         op.set_attr_llvm_inline_asm_constraints(ctx, StringAttr::new(constraints.to_string()));
         op.set_attr_llvm_inline_asm_side_effects(ctx, BoolAttr::new(side_effects));
-        op.set_attr_llvm_inline_asm_convergent(ctx, BoolAttr::new(convergent));
         op
     }
 }
@@ -2174,7 +2168,11 @@ impl InlineAsmOp {
 #[pliron_op(
     name = "llvm.call",
     interfaces = [OneResultInterface],
-    attributes = (llvm_call_callee: IdentifierAttr, llvm_call_fastmath_flags: FastmathFlagsAttr)
+    attributes = (
+        llvm_call_callee: IdentifierAttr,
+        llvm_call_fastmath_flags: FastmathFlagsAttr,
+        llvm_call_attrs: LlvmAttributesAttr
+    )
 )]
 pub struct CallOp;
 
@@ -4494,7 +4492,8 @@ pub enum FCmpOpVerifyErr {
     attributes = (
         llvm_intrinsic_name: StringAttr,
         llvm_intrinsic_type: TypeAttr,
-        llvm_intrinsic_fastmath_flags: FastmathFlagsAttr
+        llvm_intrinsic_fastmath_flags: FastmathFlagsAttr,
+        llvm_intrinsic_attrs: LlvmAttributesAttr
     )
 )]
 pub struct CallIntrinsicOp;
@@ -4729,7 +4728,11 @@ impl VAArgOp {
         NOpdsInterface<0>,
         LlvmSymbolName
     ],
-    attributes = (llvm_func_type: TypeAttr, llvm_function_linkage: LinkageAttr)
+    attributes = (
+        llvm_func_type: TypeAttr,
+        llvm_function_linkage: LinkageAttr,
+        llvm_func_attrs: LlvmAttributesAttr
+    )
 )]
 pub struct FuncOp;
 
