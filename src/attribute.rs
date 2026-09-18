@@ -9,6 +9,9 @@
 //! Attribute objects are boxed and not wrapped with [Ptr](crate::context::Ptr).
 //! They are heavy (i.e., not just a pointer, handle or reference),
 //! making clones potentially expensive.
+//! An attribute whose payload should be handled by identity (compared and hashed
+//! as a handle, stored once per [Context]) can hold it in a
+//! [Uniqued](crate::uniqued_any::Uniqued) field.
 //!
 //! The [pliron_attr](pliron::derive::pliron_attr) proc macro from the
 //! pliron-derive create can be used to implement [Attribute] for a rust type.
