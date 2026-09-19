@@ -138,7 +138,7 @@ impl StableHashTrait for SourcePosition {
 /// This captures more or less the functionality of MLIR's
 /// [BuiltinLocationAttributes](https://mlir.llvm.org/docs/Dialects/Builtin/#location-attributes).
 /// For simplicity, unlike in MLIR, [Location] is not extensible.
-#[derive(PartialEq, Eq, Clone, Debug, StableHash, CloneIntoContext)]
+#[derive(PartialEq, Eq, Clone, Debug, Hash, StableHash, CloneIntoContext)]
 pub enum Location {
     /// A [Source] along with a [position](SourcePosition) within it.
     /// This is same as MLIR's [FileLineColLoc](https://mlir.llvm.org/docs/Dialects/Builtin/#filelinecolloc).
@@ -164,36 +164,6 @@ pub enum Location {
     /// Location unknown.
     /// See [UnknownLoc](https://mlir.llvm.org/docs/Dialects/Builtin/#unknownloc).
     Unknown,
-}
-
-/// [SourcePosition] doesn't implement [Hash], so this manual impl.
-impl Hash for Location {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        core::mem::discriminant(self).hash(state);
-        match self {
-            Location::SrcPos { src, pos } => {
-                src.hash(state);
-                pos.line.hash(state);
-                pos.column.hash(state);
-            }
-            Location::Fused {
-                metadata,
-                locations,
-            } => {
-                metadata.hash(state);
-                locations.hash(state);
-            }
-            Location::Named { name, child_loc } => {
-                name.hash(state);
-                child_loc.hash(state);
-            }
-            Location::CallSite { callee, caller } => {
-                callee.hash(state);
-                caller.hash(state);
-            }
-            Location::Unknown => {}
-        }
-    }
 }
 
 impl Location {
