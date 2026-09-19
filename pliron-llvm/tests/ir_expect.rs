@@ -243,7 +243,7 @@ fn llvm_ir_instruction_flags_roundtrip() -> Result<()> {
         }
 
         ; `memory(none)` is an integer attribute whose value is zero. 
-        ; The shape table must tell it apart from an attribute that takes no payload.
+        ; The value-kind table must tell it apart from an attribute that takes no value.
         define void @zero_valued_int_attr() memory(none) {
         entry:
           ret void

@@ -8,14 +8,14 @@ use thiserror::Error;
 
 use crate::llvm_sys::core::llvm_enum_attribute_kind;
 
-/// Payload held by an LLVM enum attribute.
+/// The kind of value held by an LLVM enum attribute.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum LlvmAttrShape {
-    /// No payload, such as `nounwind`.
+pub enum LlvmAttrValueKind {
+    /// No value, such as `nounwind`.
     Enum,
-    /// An integer payload, such as `alignstack(16)`.
+    /// An integer value, such as `alignstack(16)`.
     Int,
-    /// A type payload, such as `byval(%struct.S)`.
+    /// A type value, such as `byval(%struct.S)`.
     Type,
     /// A constant range, such as `range(i32 0, 10)`. pliron does not model this.
     ConstantRange,
@@ -23,7 +23,7 @@ pub enum LlvmAttrShape {
     ConstantRangeList,
 }
 
-/// Every enum attribute that LLVM defines in `llvm/IR/Attributes.td`, with its payload shape.
+/// Every enum attribute that LLVM defines in `llvm/IR/Attributes.td`, with its value kind.
 ///
 /// LLVM's `Attribute::getNameFromAttrKind` is not in the C API.
 /// [llvm_enum_attribute_info] here provides the same functionality.
@@ -41,8 +41,8 @@ pub enum LlvmAttrShape {
 ///   | sed -E 's/def [A-Za-z0-9_]+ *: *([A-Za-z]+)Attr<"([^"]+)"/    ("\2", \1),/' \
 ///   | LC_ALL=C sort -u
 /// ```
-const LLVM_ENUM_ATTRIBUTES: &[(&str, LlvmAttrShape)] = {
-    use LlvmAttrShape::*;
+const LLVM_ENUM_ATTRIBUTES: &[(&str, LlvmAttrValueKind)] = {
+    use LlvmAttrValueKind::*;
     &[
         ("align", Int),
         ("alignstack", Int),
@@ -153,30 +153,32 @@ const LLVM_ENUM_ATTRIBUTES: &[(&str, LlvmAttrShape)] = {
 };
 
 /// Reverse of [llvm_enum_attribute_kind], over [LLVM_ENUM_ATTRIBUTES].
-static LLVM_ENUM_ATTRIBUTE_KIND_INFO: LazyLock<HMap<u32, (&'static str, LlvmAttrShape)>> =
+static LLVM_ENUM_ATTRIBUTE_KIND_INFO: LazyLock<HMap<u32, (&'static str, LlvmAttrValueKind)>> =
     LazyLock::new(|| {
         LLVM_ENUM_ATTRIBUTES
             .iter()
-            .filter_map(|(name, shape)| {
-                llvm_enum_attribute_kind(name).map(|kind| (kind, (*name, *shape)))
+            .filter_map(|(name, value_kind)| {
+                llvm_enum_attribute_kind(name).map(|kind| (kind, (*name, *value_kind)))
             })
             .collect()
     });
 
-/// The name and payload shape of the enum attribute `kind`.
-pub fn llvm_enum_attribute_info(kind: u32) -> Option<(&'static str, LlvmAttrShape)> {
+/// The name and value kind of the enum attribute `kind`.
+pub fn llvm_enum_attribute_info(kind: u32) -> Option<(&'static str, LlvmAttrValueKind)> {
     LLVM_ENUM_ATTRIBUTE_KIND_INFO.get(&kind).copied()
 }
 
 /// Errors when LLVM attributes are converted to LLVM-IR.
 #[derive(Error, Debug)]
 pub enum ToLlvmAttrErr {
-    #[error("LLVM attribute \"{name}\" of kind {shape:?} cannot hold the given payload")]
-    PayloadMismatch {
+    #[error(
+        "LLVM attribute \"{name}\" cannot hold the given value; expected value kind {value_kind:?}"
+    )]
+    ValueKindMismatch {
         /// The name of the attribute.
         name: String,
-        /// The payload that LLVM lets the attribute hold.
-        shape: LlvmAttrShape,
+        /// The kind of value that LLVM lets the attribute hold.
+        value_kind: LlvmAttrValueKind,
     },
 }
 
@@ -195,7 +197,7 @@ pub mod from_llvm_ir {
         },
     };
 
-    use super::{LlvmAttrShape, llvm_enum_attribute_info};
+    use super::{LlvmAttrValueKind, llvm_enum_attribute_info};
 
     /// Convert every LLVM attribute in `attrs` to an entry of an [LlvmAttributesAttr].
     ///
@@ -216,7 +218,7 @@ pub mod from_llvm_ir {
             }
 
             let kind = llvm_get_enum_attribute_kind(attr);
-            let Some((name, shape)) = llvm_enum_attribute_info(kind) else {
+            let Some((name, value_kind)) = llvm_enum_attribute_info(kind) else {
                 log::warn!("Dropping LLVM attribute with unknown kind id {kind}");
                 continue;
             };
@@ -228,14 +230,14 @@ pub mod from_llvm_ir {
                     llvm_get_type_attribute_value(attr),
                 )?)
             } else if llvm_is_enum_attribute(attr) {
-                if shape == LlvmAttrShape::Int {
+                if value_kind == LlvmAttrValueKind::Int {
                     LlvmAttrValue::Int(llvm_get_enum_attribute_value(attr))
                 } else {
                     LlvmAttrValue::Unit
                 }
             } else {
                 // A constant-range attribute, such as `range` or `initializes`.
-                log::warn!("Dropping LLVM attribute \"{name}\", whose payload is unsupported");
+                log::warn!("Dropping LLVM attribute \"{name}\", whose value is unsupported");
                 continue;
             };
             converted.set(name, value);
@@ -258,7 +260,9 @@ pub mod to_llvm_ir {
         to_llvm_ir::TypeConversionContext,
     };
 
-    use super::{LlvmAttrShape, ToLlvmAttrErr, llvm_enum_attribute_info, llvm_enum_attribute_kind};
+    use super::{
+        LlvmAttrValueKind, ToLlvmAttrErr, llvm_enum_attribute_info, llvm_enum_attribute_kind,
+    };
 
     /// Add `attrs` to `value`, at `value`'s function index.
     ///
@@ -281,34 +285,35 @@ pub mod to_llvm_ir {
                 continue;
             }
 
-            // Both LLVM and the shape table must know `name`.
-            let info = llvm_enum_attribute_kind(name)
-                .and_then(|kind| llvm_enum_attribute_info(kind).map(|(_, shape)| (kind, shape)));
-            let Some((kind, shape)) = info else {
+            // Both LLVM and the value-kind table must know `name`.
+            let info = llvm_enum_attribute_kind(name).and_then(|kind| {
+                llvm_enum_attribute_info(kind).map(|(_, value_kind)| (kind, value_kind))
+            });
+            let Some((kind, value_kind)) = info else {
                 log::warn!("Dropping LLVM attribute \"{name}\", unknown to this LLVM version");
                 continue;
             };
 
-            // Check shape to avoid LLVM abort on assertions-enabled builds.
-            let attr = match (shape, attr_value) {
-                (LlvmAttrShape::Enum, LlvmAttrValue::Unit) => {
+            // Check the value kind to avoid LLVM abort on assertions-enabled builds.
+            let attr = match (value_kind, attr_value) {
+                (LlvmAttrValueKind::Enum, LlvmAttrValue::Unit) => {
                     llvm_create_enum_attribute(llvm_ctx, kind, 0)
                 }
-                (LlvmAttrShape::Int, LlvmAttrValue::Int(i)) => {
+                (LlvmAttrValueKind::Int, LlvmAttrValue::Int(i)) => {
                     llvm_create_enum_attribute(llvm_ctx, kind, *i)
                 }
-                (LlvmAttrShape::Type, LlvmAttrValue::Type(ty)) => {
+                (LlvmAttrValueKind::Type, LlvmAttrValue::Type(ty)) => {
                     let llvm_ty = crate::to_llvm_ir::convert_type(ctx, llvm_ctx, tcctx, *ty)?;
                     llvm_create_type_attribute(llvm_ctx, kind, llvm_ty)
                 }
-                (LlvmAttrShape::ConstantRange | LlvmAttrShape::ConstantRangeList, _) => {
-                    log::warn!("Dropping LLVM attribute \"{name}\", whose payload is unsupported");
+                (LlvmAttrValueKind::ConstantRange | LlvmAttrValueKind::ConstantRangeList, _) => {
+                    log::warn!("Dropping LLVM attribute \"{name}\", whose value is unsupported");
                     continue;
                 }
                 _ => {
-                    return input_err_noloc!(ToLlvmAttrErr::PayloadMismatch {
+                    return input_err_noloc!(ToLlvmAttrErr::ValueKindMismatch {
                         name: name.to_string(),
-                        shape,
+                        value_kind,
                     });
                 }
             };

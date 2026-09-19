@@ -20,7 +20,7 @@ use pliron::{
     r#type::TypeHandle,
 };
 
-/// The payload of one LLVM attribute.
+/// The value of one LLVM attribute.
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub enum LlvmAttrValue {
     /// An enum attribute with no value, such as `nounwind`.
@@ -159,7 +159,7 @@ mod tests {
 
     use super::*;
 
-    /// A list with one entry of every payload shape.
+    /// A list with one entry of every value kind.
     fn sample(ctx: &mut Context) -> LlvmAttributesAttr {
         let i32_ty = IntegerType::get(ctx, 32, Signedness::Signless);
         let mut attrs = LlvmAttributesAttr::new();
