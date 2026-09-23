@@ -3,10 +3,9 @@
 
 //! Store, in [Context], a single unique copy of any object.
 //!
-//! [save] / [get] / [UniquedKey] are the raw store. [Uniqued] wraps a key so that
-//! a value handled by identity can be a field of an [Attribute](crate::attribute::Attribute),
-//! [Type](crate::type::Type) or any other IR entity, with printing, parsing and
-//! decontextualization delegated to the stored value.
+//! Use [save] to store a value and [get] to access it through a [UniquedKey].
+//!
+//! Use [Uniqued] when a value-like interface is more convenient.
 
 use core::{
     any::Any,
@@ -30,6 +29,16 @@ use crate::{
 pub(crate) struct UniquedAny(Box<dyn Any + Send>);
 
 /// A handle to the stored unique copy of an object.
+///
+/// ```
+/// use pliron::{context::Context, uniqued_any::{get, save}};
+///
+/// let ctx = &mut Context::new();
+/// let key = save(ctx, String::from("value"));
+/// assert_eq!(get(ctx, key), "value");
+/// ```
+///
+/// Also see [`Uniqued<T>`] for a value-like interface.
 #[derive(Debug)]
 pub struct UniquedKey<T> {
     index: usize,
@@ -43,8 +52,6 @@ impl<T> Clone for UniquedKey<T> {
 }
 impl<T> Copy for UniquedKey<T> {}
 
-// Manual impls, as for `Clone`: a key is an index, so equality must not
-// require `T: PartialEq`.
 impl<T> PartialEq for UniquedKey<T> {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index
@@ -83,24 +90,9 @@ pub fn get<T: Any + Hash + Eq>(ctx: &Context, key: UniquedKey<T>) -> &T {
         .expect("Type mismatch in uniqued store")
 }
 
-/// A value stored once in the [Context] and handled by identity.
+/// A value stored once (uniqued) in a [Context].
 ///
-/// Two `Uniqued<T>` built (in the same [Context]) from equal values are equal,
-/// and [Hash] / [PartialEq] compare the handle rather than the value. This is
-/// how a [Type](crate::type::Type) is handled, made available to any `T`:
-/// canonicalize the value once, then compare handles.
-///
-/// The typical use is an [Attribute](crate::attribute::Attribute) whose payload is
-/// an expression tree with a canonical form. Comparing the tree structurally on
-/// every equality check (as a plain field would) is a walk; comparing a `Uniqued`
-/// field is an integer compare. Attributes are otherwise not uniqued, see the
-/// [attribute](crate::attribute) module.
-///
-/// [Printable], [Parsable], [StableHash] and [CloneIntoContext] all delegate to
-/// the stored value, so a `Uniqued<T>` field needs nothing beyond what `T`
-/// already implements. Parsing re-uniques the parsed value into the parsing
-/// [Context], and cloning into another [Context] re-uniques there, so identity
-/// holds within a [Context] and is never carried across one.
+/// This combines a [UniquedKey] with the [save] and [get] operations.
 ///
 /// ```
 /// use pliron::{context::Context, uniqued_any::Uniqued};
@@ -116,7 +108,7 @@ pub fn get<T: Any + Hash + Eq>(ctx: &Context, key: UniquedKey<T>) -> &T {
 pub struct Uniqued<T>(UniquedKey<T>);
 
 impl<T: Any + Hash + Eq + Send> Uniqued<T> {
-    /// Store `value` (or find the copy already stored) and get a handle to it.
+    /// Get a handle to the unique copy of `value`.
     pub fn new(ctx: &mut Context, value: T) -> Self {
         Self(save(ctx, value))
     }
@@ -189,7 +181,6 @@ where
 
 impl<T: Any + Hash + Eq + Send + StableHash> StableHash for Uniqued<T> {
     fn stable_hash(&self, ctx: &Context, state: &mut dyn Hasher) {
-        // The key is an index into `ctx`'s store; hash the value it refers to.
         self.get(ctx).stable_hash(ctx, state);
     }
 }
@@ -230,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn test_uniqued_identity() {
+    fn test_uniqued() {
         let ctx = &mut Context::new();
 
         let a = Uniqued::new(ctx, String::from("Hello"));
@@ -242,7 +233,6 @@ mod tests {
         assert_eq!(a.get(ctx), "Hello");
         assert_eq!(c.get(ctx), "World");
 
-        // A different payload type with an equal store index is a different key.
         let n = Uniqued::new(ctx, 0u64);
         assert_eq!(*n.get(ctx), 0);
     }
