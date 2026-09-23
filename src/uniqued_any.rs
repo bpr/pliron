@@ -108,17 +108,17 @@ pub fn get<T: Any + Hash + Eq>(ctx: &Context, key: UniquedKey<T>) -> &T {
 pub struct Uniqued<T>(UniquedKey<T>);
 
 impl<T: Any + Hash + Eq + Send> Uniqued<T> {
-    /// Get a handle to the unique copy of `value`.
+    /// Unique and store the given `value`.
     pub fn new(ctx: &mut Context, value: T) -> Self {
         Self(save(ctx, value))
     }
 
-    /// The stored value.
+    /// Get a reference to the stored value.
     pub fn get<'c>(&self, ctx: &'c Context) -> &'c T {
         get(ctx, self.0)
     }
 
-    /// The underlying store key.
+    /// Get the underlying store key.
     pub fn key(&self) -> UniquedKey<T> {
         self.0
     }
@@ -222,6 +222,11 @@ mod tests {
 
     #[test]
     fn test_uniqued() {
+        #[derive(Hash, PartialEq, Eq)]
+        struct Meters(u64);
+        #[derive(Hash, PartialEq, Eq)]
+        struct Feet(u64);
+
         let ctx = &mut Context::new();
 
         let a = Uniqued::new(ctx, String::from("Hello"));
@@ -233,7 +238,18 @@ mod tests {
         assert_eq!(a.get(ctx), "Hello");
         assert_eq!(c.get(ctx), "World");
 
-        let n = Uniqued::new(ctx, 0u64);
-        assert_eq!(*n.get(ctx), 0);
+        // Values of different types but identical hashes.
+        let u = Uniqued::new(ctx, 0u64);
+        let i = Uniqued::new(ctx, 0i64);
+        assert_ne!(u.key().index, i.key().index);
+        assert_eq!(*u.get(ctx), 0u64);
+        assert_eq!(*i.get(ctx), 0i64);
+
+        // Same for two newtypes that wrap an equal value.
+        let m = Uniqued::new(ctx, Meters(3));
+        let f = Uniqued::new(ctx, Feet(3));
+        assert_ne!(m.key().index, f.key().index);
+        assert_eq!(m.get(ctx).0, 3);
+        assert_eq!(f.get(ctx).0, 3);
     }
 }
